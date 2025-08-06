@@ -23,7 +23,7 @@ Purpose:
 from langchain.output_parsers import PydanticOutputParser    # Parses LLM output into validated Pydantic objects
 from langchain.prompts import PromptTemplate                 # Prompt templating for LLM calls
 from pydantic import BaseModel, Field, ValidationError        # Data modeling and validation (Pydantic v2 syntax)
-from typing import Literal, Annotated, Optional, Union        # Type hints and literal constraints
+from typing import Literal, Annotated, Union                  # Type hints and literal constraints
 import json                                                   # Manual JSON parsing 
 from langchain_openai import ChatOpenAI                       # OpenAI wrapper with LangChain
 import time                                                   # Retry delay handling
@@ -98,22 +98,50 @@ TypeOfML = Literal[
 ]
 
 # -------------------- Define Output Schema --------------------
+# Define the output schema
 class JobInfo(BaseModel):
-    """
-    Schema for extracting structured ML job posting data from text.
-    """
     seniority_level: Literal["Early Career", "Mid-Level", "Senior", "Not mentioned"] = Field(
-        description="Determine seniority strictly from stated years of experience; see detailed rules."
+     description=(
+        "Seniority level is determined **only** from the minimum years of experience explicitly stated "
+        "in the job description, except for internships:\n"
+        "- Early Career: minimum years is less than 2\n"
+        "- Mid-Level: minimum years is at least 2 but less than 5\n"
+        "- Senior: minimum years is 5 or more\n"
+        "- Not mentioned: Use this if the job description does not specify years of experience\n\n"
+        "Special rules:\n"
+        "1. If the role is an internship, always assign 'Early Career'.\n"
+        "2. If a range is given (e.g., '3–7 years'), use the **lower bound** (3) as the minimum.\n"
+        "3. For 'at least X years' wording, treat X as the minimum.\n"
+        "4. Do NOT infer seniority from job titles, responsibilities, or skills unless explicit years of experience are provided."
     )
-    internship: bool = Field(description="True if internship, else False.")
-    degree_requirements: str = Field(description="Degree(s) and fields as a single string.")
-    programming_languages: Annotated[list[str], Field(min_length=1)] = Field(description="Programming languages.")
-    type_of_ml: list[Union[TypeOfML, str]] = Field(min_length=1, max_length=6, description="List of ML types used.")
-    libraries_and_tools: Annotated[list[str], Field(min_length=1)] = Field(description="ML libraries/tools, excluding cloud platforms.")
-    cloud_platforms: Annotated[list[str], Field(min_length=1)] = Field(description="Cloud platforms used.")
-    key_responsibilities: Annotated[list[str], Field(min_length=2, max_length=4)] = Field(description="2–4 ML-related responsibilities.")
-    domain: list[Union[DomainType, str]] = Field(min_length=1, max_length=2, description="1–2 applicable industry domains.")
-
+    )
+    internship: bool = Field(
+        description="Whether the job is an internship or not (boolean only), 'true' if an internship and 'false' otherwise"
+    )
+    degree_requirements: str = Field(
+         description="Degree requirement as a single string, combining degree level and fields of study (e.g., B.S. or M.S. (PhD preferred) in Data Science, Statistics, or a related field)."
+    )
+    programming_languages: Annotated[list[str], Field(min_length=1)] = Field(
+        description="Programming languages relevant to this role (e.g., Python, Java, SQL, Scala)"
+    )
+    type_of_ml: Annotated[list[TypeOfML], Field(min_length=1, max_length=6)] = Field( 
+        description="List of 1–6 standardized ML types used in the role. Use title case. Select from a controlled vocabulary such as 'Natural Language Processing', 'Robotics', 'Time Series Analysis', etc."
+    )
+    libraries_and_tools: Annotated[list[str], Field(min_length=1)]= Field(
+        description=(
+        "ML libraries or tools mentioned (e.g., PyTorch, Docker, Kubernetes, Git, MLflow). Do not include cloud platforms such as AWS, Azure, or GCP in this list."
+        "If no tools are mentioned, output a single-item list: ['Not mentioned']."
+        )
+    )
+    cloud_platforms: Annotated[list[str], Field(min_length=1)]= Field(
+        description="Cloud platforms mentioned (e.g., AWS, Azure, GCP). Use 'Not mentioned' if none."
+    )
+    key_responsibilities: Annotated[list[str], Field(min_length=2, max_length=4)] = Field(
+        description="Short bullet list (2–4 items) summarizing main ML-related responsibilities."
+    )
+    domain: Annotated[list[DomainType], Field(min_length=1, max_length=2)] = Field( 
+    description=("One or two industry domains where the ML work is applied based on the company name (e.g., ['Healthcare'], or ['Retail', 'Advertising']). Use the most specific applicable categories.")
+    )
 # -------------------- Build Prompt Template --------------------
 parser = PydanticOutputParser(pydantic_object=JobInfo)
 format_instructions = parser.get_format_instructions()
