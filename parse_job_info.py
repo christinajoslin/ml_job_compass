@@ -204,4 +204,10 @@ filtered_df["parsed_job_info"] = filtered_df.progress_apply(
 
 # -------------------- Flatten JSON and Save --------------------
 new_df = pd.json_normalize(filtered_df['parsed_job_info'])
-new_df.to_csv('parsed_1000_ml_jobs_us.csv', index=False)
+
+# remove the rows with missing values 
+clean_df = new_df.dropna() 
+
+print(f"Parsed Dataset: {len(clean_df)} entries")
+
+clean_df.to_csv('parsed_1000_ml_jobs_us.csv', index=False)
