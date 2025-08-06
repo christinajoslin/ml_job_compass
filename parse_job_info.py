@@ -6,15 +6,15 @@ Date: 8/5/2025
 Purpose:
     - Load raw job postings from CSV.
     - Use a structured output parser with Pydantic to extract:
-        • Seniority level (Early Career (0 to less than 2 years), Mid-Level (2 to less than 5 years), Senior (5 or more years), Not mentioned)
-        • Internship (True/False)
-        • Degree requirements
-        • Programming languages
-        • ML types (1-6 types from a standardized list (e.g., Computer Vision, Generative AI))
-        • Libraries & tools (e.g., PyTorch, Docker, Kubernetes)
-        • Cloud platforms (e.g., AWS, Azure, GCP)
-        • Key responsibilities (2-4 short bullet points summarizing ML-related responsibilities)
-        • Domain classification (1-2 industry domains from a standardized list where the ML work is applied) 
+        - Seniority level (Early Career (0 to less than 2 years), Mid-Level (2 to less than 5 years), Senior (5 or more years), Not mentioned)
+        - Internship (True/False)
+        - Degree requirements
+        - Programming languages
+        - ML types (1-6 types from a standardized list (e.g., Computer Vision, Generative AI))
+        - Libraries & tools (e.g., PyTorch, Docker, Kubernetes)
+        - Cloud platforms (e.g., AWS, Azure, GCP)
+        - Key responsibilities (2-4 short bullet points summarizing ML-related responsibilities)
+        - Domain classification (1-2 industry domains from a standardized list where the ML work is applied) 
     - Retry parsing multiple times if schema validation fails.
     - Save the normalized structured data to CSV for downstream analysis such as clustering and dashboard visualization.
 """
