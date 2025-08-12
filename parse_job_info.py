@@ -148,6 +148,7 @@ format_instructions = parser.get_format_instructions()
 
 prompt = PromptTemplate(
     template="""
+
 You are a helpful assistant that extracts structured information from job descriptions for ML positions.
 
 {format_instructions}
