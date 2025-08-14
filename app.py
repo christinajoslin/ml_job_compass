@@ -7,6 +7,26 @@ import pandas as pd
 from collections import Counter
 import plotly.express as px 
 from datetime import datetime 
+from openai import OpenAI
+from cryptography.fernet import Fernet  
+
+@st.cache_resource 
+def _openai_client(): 
+    # -------------------- Load and Decrypt API Key --------------------
+    # Read encryption key from config file
+    with open(".config.dat", 'rb') as key_file:
+        key = key_file.read()
+
+    # Create Fernet cipher object
+    fernet = Fernet(key)
+
+    # Read encrypted API key from file
+    with open("gen_key.enc", "rb") as enc_file:
+        encrypted_api_key = enc_file.read()
+
+    # Decrypt API key and store it in environment for LLM calls
+    decrypted_api_key = fernet.decrypt(encrypted_api_key).decode()
+    return OpenAI(api_key = decrypted_api_key)
 
 AUTHOR = "Christina Joslin"
 UPDATED = datetime.now().strftime("%b %d, %Y")
@@ -294,12 +314,35 @@ with tab_recs:
     get_recs = st.button("Get recomendations", type="primary", key="rec_go")
 
     if get_recs: 
-        st.info("Inputs captured.")
-        st.json(
-            {
-                "domain": rec_domain,
-                "experience": target_level,
-                "internship": targetting_intern,
-                "top_n": top_n_recs,
-            }
-        )
+        plan_slot = st.empty() # location where the answer will be rendered 
+
+        with st.spinner("Generating recommendations..."): 
+            client = _openai_client() 
+
+            # Build a simple prompt from the user's choices
+            target = "an Internship role" if targetting_intern else f"a {target_level} full-time role"
+
+            user_prompt = (
+            f"Target industry domain: {rec_domain}\n"
+            f"Target role: {target}\n\n"
+            f"In bullet points, list {top_n_recs} essential skills to learn next and 1 mini-project for each. "
+            "Keep it under 150 words."
+            )
+
+            try: 
+                resp = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                {"role": "system", "content": "You are a concise career coach."},
+                {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.3,
+                )
+                answer=resp.choices[0].message.content
+            except Exception as e: 
+                st.error(f"Oops - couldn't get recommendations: {e}")
+                st.stop()
+        
+        with plan_slot.container(): 
+            st.markdown("### Suggested plan")
+            st.markdown(answer)
