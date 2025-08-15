@@ -99,7 +99,7 @@ def plotify_df(subset, column_name, top_n):
     top_items = counts.most_common(top_n)
     return pd.DataFrame(top_items, columns =["Item","Count"])
 # --- Additional buttons for exploration -----# 
-tab_overview, tab_explore, tab_recs = st.tabs(["Overview","Explore", "Recommendations"])
+tab_explore, tab_recs = st.tabs(["Explore", "Recommendations"])
 # put this once (before/after tabs — either is fine)
 st.markdown("""
 <style>
@@ -119,14 +119,7 @@ div[data-testid="stTabs"] button[role="tab"] {
 }
 </style>
 """, unsafe_allow_html=True)
-#--------------- OVERVIEW TAB----------------# 
-with tab_overview: 
-    st.subheader("Explore Top Overall 2025 ML Job Skills")
-    st.markdown(
-        """
-"""
-    )
-    
+
 #------------- EXPLORE TAB ------------------# 
 with tab_explore: 
 
