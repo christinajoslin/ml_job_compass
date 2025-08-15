@@ -64,7 +64,7 @@ df["frameworks_tools"] = df.apply(
 )
 
 
-st.set_page_config(page_title="Quickstart Dashboard", layout="wide")
+st.set_page_config(page_title="ML Job Insights", layout="wide")
 st.title("Machine Learning Job Insights")
 st.markdown(
     f"<div style='font-size:0.95rem;color:#6B7280'>"
@@ -99,19 +99,45 @@ def plotify_df(subset, column_name, top_n):
     top_items = counts.most_common(top_n)
     return pd.DataFrame(top_items, columns =["Item","Count"])
 # --- Additional buttons for exploration -----# 
-tab_explore, tab_recs = st.tabs(["Explore", "Recommendations"])
+tab_overview, tab_explore, tab_recs = st.tabs(["Overview","Explore", "Recommendations"])
+# put this once (before/after tabs — either is fine)
+st.markdown("""
+<style>
+/* Increase tab label font size */
+div[data-testid="stTabs"] button[role="tab"] p {
+    font-size: 1.15rem;      /* try 1.25rem, 18px, etc. */
+}
 
+/* Make active tab a bit bolder */
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] p {
+    font-weight: 600;
+}
+
+/* (optional) add some breathing room */
+div[data-testid="stTabs"] button[role="tab"] {
+    padding: 0.5rem 1rem;
+}
+</style>
+""", unsafe_allow_html=True)
+#--------------- OVERVIEW TAB----------------# 
+with tab_overview: 
+    st.subheader("Explore Top Overall 2025 ML Job Skills")
+    st.markdown(
+        """
+"""
+    )
+    
 #------------- EXPLORE TAB ------------------# 
 with tab_explore: 
 
-    st.subheader("Explore 2025 ML Job Trends")
+    st.subheader("Explore Top ML Job Skills by Industry Domain")
     st.markdown(
     """
-    Use the controls below to explore job postings in machine learning (ML) by **industry domain**.  
+    Use the controls below to the top skill listed in machine learning (ML) position descriptions by **industry domain**.  
     The charts show:  
     (1) Top programming languages  
     (2) Top tools & cloud platforms  
-    (3) Most-mentioned ML concepts
+    (3) Most-mentioned ML specializations
     """
     )
     selected_domain = st.selectbox("Select a domain", domains_list, index=0)
@@ -252,7 +278,7 @@ with tab_explore:
     )
 
     fig3.update_layout(
-    title=f"Top {len(plot_df_concepts)} Machine Learning Concepts",
+    title=f"Top {len(plot_df_concepts)} Machine Learning Specializations",
     margin=dict(l=0, r=0, t=60, b=0),
     coloraxis_showscale=False
     )
@@ -263,12 +289,12 @@ with tab_explore:
 with tab_recs: 
     st.subheader("Personalized skill recommendations")
     st.markdown(
-        "Based on your **target industry domain** and the **experience level of the role you want to pursue** "
-        "(not your current level), we’ll suggest the core skills and practice projects to help you upskill "
-        "and become competitive for these positions."
+        "Based on your **target industry domain**, **target machine learning specialization** (optional), "
+        "and the **experience level of the role you want to pursue** (not your current level), "
+        "we’ll suggest the core skills and practice projects to help you upskill and become competitive "
+        "for these positions."
     )
-
-    col1, col2, col3 = st.columns([2, 2, 1.6])
+    col1, col2, col3, col4 = st.columns([2, 2, 1.6,1.6])
 
     with col1: 
         # defaults to the same domain picked previously 
@@ -309,9 +335,33 @@ with tab_recs:
             help="Choose a concise core list or a longer plan."
         )
     
+    APPLICATION_AREAS = ["Natural Language Processing (NLP)",
+                         "Computer Vision",
+                         "Speech & Audio Machine Learning",
+                         "Multimodal Learning",
+                         "Ensemble Learning",
+                         "Causal Inference",
+                         "Time Series Forecasting",
+                         "Anomaly Detection",
+                         "Recommender System",
+                         "Graph Machine Learning",
+                         "Reinforcement Learning",
+                         "Embedded and Edge Machine Learning",
+                         "Machine Learning Operations (MLOps)",
+                         ""]
+    with col4: 
+        type_of_ml = st.selectbox(
+        "Machine Learning Specialization (optional)",
+        APPLICATION_AREAS,
+        index=None, # no preselection
+        placeholder="Choose a specialization",
+        key="rec_ml_types",
+        help="Select at most one specialization relevant to your machine learning interests or leave blank.")
+
     top_n_recs = 5 if detail.startswith("Essential") else 10 
 
     get_recs = st.button("Get recomendations", type="primary", key="rec_go")
+
 
     if get_recs: 
         plan_slot = st.empty() # location where the answer will be rendered 
@@ -320,15 +370,22 @@ with tab_recs:
             client = _openai_client() 
 
             # Build a simple prompt from the user's choices
-            target = "an Internship role" if targetting_intern else f"a {target_level} full-time role"
+            target = "Internship" if targetting_intern else f"a {target_level} full-time role"
 
-            user_prompt = (
-            f"Target industry domain: {rec_domain}\n"
-            f"Target role: {target}\n\n"
-            f"In bullet points, list {top_n_recs} essential skills to learn next and 1 mini-project for each. "
-            "Keep it under 150 words."
-            )
 
+            user_prompt_parts = [
+                f"Target industry domain: {rec_domain}" 
+            ]
+            
+            if type_of_ml == "": # only if the user selected a category then you can add this to the user prompt
+                user_prompt_parts.append(f"Target machine learning specialization: {type_of_ml}")
+
+            user_prompt_parts.append(f"Target role: {target}")
+            user_prompt_parts.append(f"In bullet points, list {top_n_recs} essential skills to learn next and 1 mini-project for each. "
+            "Keep it under 150 words.")
+
+            user_prompt = "\n".join(user_prompt_parts)
+            
             try: 
                 resp = client.chat.completions.create(
                 model="gpt-4o",
