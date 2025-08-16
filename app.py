@@ -3,30 +3,42 @@
 import streamlit as st 
 from streamlit_extras.stylable_container import stylable_container 
 import ast 
+import os
 import pandas as pd 
 from collections import Counter
 import plotly.express as px 
 from datetime import datetime 
-from openai import OpenAI
-from cryptography.fernet import Fernet  
+import requests 
 
 @st.cache_resource 
-def _openai_client(): 
-    # -------------------- Load and Decrypt API Key --------------------
-    # Read encryption key from config file
-    with open(".config.dat", 'rb') as key_file:
-        key = key_file.read()
 
-    # Create Fernet cipher object
-    fernet = Fernet(key)
+def _ollama_config():
+    """
+    Returns (base_url, model_id) for Ollama.
+    Set via environment vars or defaults to localhost + gpt-oss:20b.
+    """
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    model_id = os.getenv("MODEL_ID", "gpt-oss:20b")
+    return base_url, model_id
 
-    # Read encrypted API key from file
-    with open("gen_key.enc", "rb") as enc_file:
-        encrypted_api_key = enc_file.read()
-
-    # Decrypt API key and store it in environment for LLM calls
-    decrypted_api_key = fernet.decrypt(encrypted_api_key).decode()
-    return OpenAI(api_key = decrypted_api_key)
+def ollama_generate(prompt, temperature= 0.3):
+    """
+    Calls Ollama's /api/generate endpoint and returns the generated text.
+    """
+    base_url, model_id = _ollama_config()
+    r = requests.post(
+        f"{base_url}/api/generate",
+        json={
+            "model": model_id,
+            "prompt": prompt,
+            "temperature": temperature,
+            "stream": False
+        },
+        timeout=600,
+    )
+    r.raise_for_status()
+    data = r.json()
+    return data.get("response", "")
 
 AUTHOR = "Christina Joslin"
 UPDATED = datetime.now().strftime("%b %d, %Y")
@@ -133,13 +145,28 @@ with tab_explore:
     (3) Most-mentioned ML specializations
     """
     )
-    selected_domain = st.selectbox("Select a domain", domains_list, index=0)
+    
+    show_overall = st.toggle(
+    "Show overall statistics across all industry domains",
+    value=False,
+    help="Turn on to see aggregate trends across all industry domains."
+    )
+    
+    selected_domain = st.selectbox("Select a domain", domains_list, index=0, disabled=show_overall)
+    
+      #----------------Aggregate tools and platforms for the selected domain (if applicable)----------------------# 
+
+    if show_overall: 
+        subset = df.copy() 
+        scope_label="All industry domains (overall)"
+        root_label="All industry domains"
+    else: 
+        subset = df[df["domain"].apply(lambda doms: selected_domain in doms)]
+        scope_label = f"Industry Domain: {selected_domain}"
+        root_label=selected_domain 
+    
     st.divider() 
-    st.subheader(f"Industry Domain: {selected_domain}")
-
-    #----------------Aggregate toolsplatforms for the selected domain----------------------# 
-
-    subset = df[df["domain"].apply(lambda doms: selected_domain in doms)]
+    st.subheader(scope_label)
 
     #------------- Show Visualizations for the Given Domain ----------------------# 
 
@@ -258,7 +285,7 @@ with tab_explore:
     plot_df_concepts = plotify_df(subset, "type_of_ml", top_n_concepts) 
     fig3 = px.treemap(
     plot_df_concepts.sort_values("Count", ascending=False), 
-    path=[px.Constant(f"{selected_domain}"), "Item"], values="Count",
+    path=[px.Constant(root_label), "Item"], values="Count",
     color="Count",
     color_continuous_scale=px.colors.sequential.Mint
     )
@@ -360,7 +387,6 @@ with tab_recs:
         plan_slot = st.empty() # location where the answer will be rendered 
 
         with st.spinner("Generating recommendations..."): 
-            client = _openai_client() 
 
             # Build a simple prompt from the user's choices
             target = "Internship" if targetting_intern else f"a {target_level} full-time role"
@@ -377,18 +403,11 @@ with tab_recs:
             user_prompt_parts.append(f"In bullet points, list {top_n_recs} essential skills to learn next and 1 mini-project for each. "
             "Keep it under 150 words.")
 
+            system_hint = "You are a concise career coach."
             user_prompt = "\n".join(user_prompt_parts)
-            
+            full_prompt = f"{system_hint}\n\n{user_prompt}"
             try: 
-                resp = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                {"role": "system", "content": "You are a concise career coach."},
-                {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.3,
-                )
-                answer=resp.choices[0].message.content
+                answer = ollama_generate(full_prompt)
             except Exception as e: 
                 st.error(f"Oops - couldn't get recommendations: {e}")
                 st.stop()
@@ -396,3 +415,11 @@ with tab_recs:
         with plan_slot.container(): 
             st.markdown("### Suggested plan")
             st.markdown(answer)
+
+
+# TODO: Setup the RAG from ChromaDB and refine your prompt!
+
+# Update requirements.txt 
+
+# Trial user run with parents of the dashboard 
+
