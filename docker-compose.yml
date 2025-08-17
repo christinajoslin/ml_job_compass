@@ -1,0 +1,16 @@
+services:
+  app:  # Streamlit app
+    build: .
+    image: ml-job-compass:latest
+    ports:
+      - "8501:8501" 
+    gpus: all                                 # remove if you don't have an NVIDIA GPU 
+    env_file:
+      - .env
+    environment:
+      # talk to the host’s Ollama (listening on localhost:11434 on your machine)
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      MODEL_ID: ${MODEL_ID:-granite3.3:8b}
+    volumes:
+      - .:/app                                  # dev: live reload on save
+  

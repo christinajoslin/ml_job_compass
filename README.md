@@ -1,1 +1,2 @@
-# ml_job_insights
+# 🧭 ML Job Compass 
+## 

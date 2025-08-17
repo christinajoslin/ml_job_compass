@@ -10,35 +10,75 @@ import plotly.express as px
 from datetime import datetime 
 import requests 
 from chroma_store import get_collection, _load_embedder, query_topk, format_context
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from dotenv import load_dotenv
+
+load_dotenv(override=False)  # (Only applicable to local hosting) looks for a .env in the current working directory
+
+DEFAULT_OLLAMA_URL = "http://host.docker.internal:11434"  # for local runs with not container 
 
 @st.cache_resource 
+def _ollama_client():
+    """
+    Build and cache an HTTP client + config for talking to the Ollama server.
 
-def _ollama_config():
-    """
-    Returns (base_url, model_id) for Ollama.
-    Set via environment vars or defaults to localhost + LLM of your choice (recommend instruction-tuned)
-    """
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    model_id = os.getenv("MODEL_ID", "granite3.3:8b")
-    return base_url, model_id
+    Returns:
+      (base_url: str, model_id: str, session: requests.Session)
 
-def ollama_generate(prompt, temperature= 0.3):
+    How config is resolved:
+    - OLLAMA_BASE_URL: where the Ollama server is.
+        * Compose (Option B): http://ollama:11434   (set in docker-compose.yml)
+        * Local host:        http://localhost:11434 (export in your shell or .env)
+    - MODEL_ID: which model Ollama should use (e.g., 'granite3.3:8b', 'llama3.1:8b-instruct').
+
+    Why cache?
+    - Streamlit reruns the script on each UI change; caching avoids recreating the Session.
+    - The requests.Session below has retry/backoff for minor transient errors (429/502/503/504).
     """
-    Calls Ollama's /api/generate endpoint and returns the generated text.
-    """
-    base_url, model_id = _ollama_config()
-    r = requests.post(
-        f"{base_url}/api/generate",
-        json={
-            "model": model_id,
-            "prompt": prompt,
-            "temperature": temperature,
-            "stream": False
-        },
-        timeout=600,
+    base_url = os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_URL)
+    model_id = os.getenv("MODEL_ID")
+
+    # Create a resilient HTTP session with basic retry/backoff.
+    session = requests.Session()
+    retry = Retry(
+        total=3,                  # up to 3 retries on certain status codes
+        backoff_factor=0.5,       # 0s, 0.5s, 1s, 2s...
+        status_forcelist=[429, 502, 503, 504],
+        allowed_methods=["GET", "POST"],
     )
-    r.raise_for_status()
-    data = r.json()
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+    return base_url, model_id, session
+
+def ollama_generate(prompt, temperature = 0.3):
+    """
+    Call Ollama's /api/generate and return the generated text.
+
+    Args:
+      prompt: The text you want the model to respond to.
+      temperature: Sampling temperature (higher = more random).
+
+    Behavior:
+      - Uses OLLAMA_BASE_URL and MODEL_ID from env (or sensible defaults).
+      - Works in both Compose (talks to http://ollama:11434) and non-Compose (set localhost).
+
+    Returns:
+      The 'response' string from Ollama.
+    """
+    base_url, model_id, session = _ollama_client()
+
+    payload = {
+        "model": model_id,
+        "prompt": prompt,
+        "temperature": temperature,
+        "stream": False,          # stream=False returns a single JSON at the end
+    }
+    resp = session.post(f"{base_url}/api/generate", json=payload, timeout=600)
+    resp.raise_for_status()
+    data = resp.json()
     return data.get("response", "")
 
 AUTHOR = "Christina Joslin"
@@ -80,7 +120,7 @@ df["frameworks_tools"] = df.apply(
 st.set_page_config(page_title="ML Job Compass", layout="wide", page_icon="🧭")
 
 TITLE   = "🧭ML Job Compass"  # <-- pick one of the titles above
-SLOGAN  = "Get the machine learning job you want, learn the skills to get there."
+SLOGAN  = "Get the machine learning job you want by learning the skills to get there."
 AUTHOR  = AUTHOR            # keep your existing variables
 UPDATED = UPDATED
 
@@ -681,6 +721,5 @@ with tab_recs:
             st.markdown(answer)
 
 
-# Update requirements.txt 
 
 
