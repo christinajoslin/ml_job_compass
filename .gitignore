@@ -1,3 +1,5 @@
 .venv
+.env
 .config.dat
 gen_key.enc 
+__pycache__/

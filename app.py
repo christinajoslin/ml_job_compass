@@ -9,16 +9,17 @@ from collections import Counter
 import plotly.express as px 
 from datetime import datetime 
 import requests 
+from chroma_store import get_collection, _load_embedder, query_topk, format_context
 
 @st.cache_resource 
 
 def _ollama_config():
     """
     Returns (base_url, model_id) for Ollama.
-    Set via environment vars or defaults to localhost + gpt-oss:20b.
+    Set via environment vars or defaults to localhost + LLM of your choice (recommend instruction-tuned)
     """
     base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    model_id = os.getenv("MODEL_ID", "gpt-oss:20b")
+    model_id = os.getenv("MODEL_ID", "granite3.3:8b")
     return base_url, model_id
 
 def ollama_generate(prompt, temperature= 0.3):
@@ -75,24 +76,112 @@ df["frameworks_tools"] = df.apply(
     axis=1
 )
 
+# ---- Page setup ----
+st.set_page_config(page_title="ML Job Compass", layout="wide", page_icon="🧭")
 
-st.set_page_config(page_title="ML Job Insights", layout="wide")
-st.title("Machine Learning Job Insights")
+TITLE   = "🧭ML Job Compass"  # <-- pick one of the titles above
+SLOGAN  = "Get the machine learning job you want, learn the skills to get there."
+AUTHOR  = AUTHOR            # keep your existing variables
+UPDATED = UPDATED
+
+# ---- One-time CSS (fonts + palette + hero) ----
+st.markdown("""
+<style>
+/* Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@700;800&display=swap');
+
+/* Palette (teal family) */
+:root {
+  --accent: #5aae94;
+  --accent-2: #4f947e;
+  --accent-3: #3b6e5c;
+  --ink: #0f172a;         /* slate-900 */
+  --muted: #6b7280;       /* gray-500 */
+  --panel: #f2f4f7;       /* light panel */
+}
+
+/* Reset default title margin */
+.block-container h1 { margin: 0; }
+
+/* Hero band */
+.hero {
+  background: linear-gradient(90deg, var(--accent), #72b6a7);
+  border-radius: 16px;
+  padding: 28px 28px 24px 28px;
+  color: white;
+  margin: 4px 0 18px 0;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+}
+.hero-title {
+  font-family: "Plus Jakarta Sans", Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-size: 40px;
+  line-height: 1.1;
+  margin-bottom: 6px;
+}
+.hero-slogan {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-weight: 600;
+  font-size: 18px;
+  opacity: 0.95;
+  margin-bottom: 10px;
+}
+.hero-meta {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-weight: 400;
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+/* Soft card for 'How to use' */
+.card {
+  background: var(--panel);
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-top: 10px;
+}
+.card h3 {
+  margin: 0 0 8px 0;
+  font-family: Inter, system-ui;
+  font-weight: 700;
+  color: var(--ink);
+}
+.card p, .card li {
+  color: var(--muted);
+  font-family: Inter, system-ui;
+  font-size: 15px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ---- Hero header (title + slogan + meta) ----
 st.markdown(
-    f"<div style='font-size:0.95rem;color:#6B7280'>"
-    f"By <b>{AUTHOR}</b> · Last updated {UPDATED}"
-    f"</div>",
-    unsafe_allow_html=True,
+    f"""
+    <div class="hero">
+      <div class="hero-title">{TITLE}</div>
+      <div class="hero-slogan">{SLOGAN}</div>
+      <div class="hero-meta">By <b>{AUTHOR}</b> · Last updated {UPDATED}</div>
+    </div>
+    """,
+    unsafe_allow_html=True
 )
+
+# ---- How to use it (styled card) ----
 st.markdown(
     """
-    **What this is:** An interactive view of skills in 2025 U.S. Machine Learning (ML) job postings with a personalized upskilling coach.
-
-    **How to use it**
-    - **Explore:** Pick a domain to see the top programming languages, tools & cloud platforms, and ML concepts in current postings.
-    - **Recommendations:** Choose your target domain and the experience level of the role you want (or toggle Internship) to get essential skills and practice project ideas.
+    <div class="card">
+      <h3>How to use</h3>
+      <ul>
+        <li><b>Exploration</b>: Explore required ML skills in current U.S. job postings (2025) by industry domain.</li>
+        <li><b>Personalization</b>: Choose a target domain, career level, and optional ML specialization to get a tailored <i>skills checklist</i> or <i>phased roadmap</i>.</li>
+      </ul>
+    </div>
     """,
+    unsafe_allow_html=True
 )
+
 st.divider()
 
 #---------- Count of Domains-------------# 
@@ -110,8 +199,13 @@ def plotify_df(subset, column_name, top_n):
     counts = Counter(items)
     top_items = counts.most_common(top_n)
     return pd.DataFrame(top_items, columns =["Item","Count"])
-# --- Additional buttons for exploration -----# 
-tab_explore, tab_recs = st.tabs(["Explore", "Recommendations"])
+# --- Define the page tabs-----# 
+
+if "section" not in st.session_state:
+    st.session_state.section = "Exploration"  # default
+
+
+tab_explore, tab_recs = st.tabs(["Exploration", "Personalization"])
 # put this once (before/after tabs — either is fine)
 st.markdown("""
 <style>
@@ -132,34 +226,43 @@ div[data-testid="stTabs"] button[role="tab"] {
 </style>
 """, unsafe_allow_html=True)
 
-#------------- EXPLORE TAB ------------------# 
+#------------- EXPLORATION TAB ------------------# 
 with tab_explore: 
 
     st.subheader("Explore Top ML Job Skills by Industry Domain")
     st.markdown(
     """
-    Use the controls below to the top skill listed in machine learning (ML) position descriptions by **industry domain**.  
-    The charts show:  
-    (1) Top programming languages  
-    (2) Top tools & cloud platforms  
-    (3) Most-mentioned ML specializations
+    Use the slider controls below to identify the top (up to 10) programming languages, tools & cloud platforms, and ML specializations by **industry domain for all career levels**.  
     """
     )
     
     show_overall = st.toggle(
-    "Show overall statistics across all industry domains",
-    value=False,
-    help="Turn on to see aggregate trends across all industry domains."
+    "Show for all industry domains",
+    value=False
     )
-    
-    selected_domain = st.selectbox("Select a domain", domains_list, index=0, disabled=show_overall)
+    with stylable_container(
+        key="lang_controls_card_1",
+        css_styles="""
+        {
+            background: #5aae94ff;                 /* light teal */
+            border: 1px solid #E5E7EB;           /* subtle border */
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 4px 0 12px 0;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+            color: #ffff
+        }
+        """
+    ):
+        st.markdown('<strong>Step 1. Select an industry domain.</strong>', unsafe_allow_html=True)
+        selected_domain = st.selectbox("", domains_list, index=0, disabled=show_overall)
     
       #----------------Aggregate tools and platforms for the selected domain (if applicable)----------------------# 
 
     if show_overall: 
         subset = df.copy() 
-        scope_label="All industry domains (overall)"
-        root_label="All industry domains"
+        scope_label="All Industry Domains"
+        root_label="All Industry Domains"
     else: 
         subset = df[df["domain"].apply(lambda doms: selected_domain in doms)]
         scope_label = f"Industry Domain: {selected_domain}"
@@ -185,7 +288,8 @@ with tab_explore:
         }
         """
     ):
-        top_n_languages = st.slider("Top N programming languages", 3, 10, 5)
+        st.markdown('<center><strong>Step 2.</strong> Use slider to select up to 10 top programming languages.</center>', unsafe_allow_html=True)
+        top_n_languages = st.slider("", 3, 10, 5, key = "nlanguages")
     
     plot_df_languages = plotify_df(subset, "programming_languages", top_n_languages)
     lang_df = plot_df_languages.sort_values("Count", ascending=False).copy()
@@ -246,7 +350,8 @@ with tab_explore:
     }
     """
     ):
-        top_n_tools = st.slider("Top N tools & cloud platforms", 3, 10,5)
+        st.markdown('<center><strong>Step 3.</strong> Use slider to select up to 10 top tools & cloud platforms.</center>',unsafe_allow_html=True)
+        top_n_tools = st.slider("", 3, 10,5, key = "ntools")
     plot_df_tools = plotify_df(subset, "frameworks_tools",top_n_tools)
     fig2 = px.bar(
     plot_df_tools.sort_values("Count", ascending=False),
@@ -281,7 +386,8 @@ with tab_explore:
         }
         """
         ):   
-        top_n_concepts = st.slider("Top N machine learning concepts", 3, 10, 5)
+        st.markdown('<center><strong>Step 4.</strong> Use slider to select up to 10 top machine learning specializations.</center>',unsafe_allow_html=True)
+        top_n_concepts = st.slider("", 3, 10, 5, key = "nconcepts")
     plot_df_concepts = plotify_df(subset, "type_of_ml", top_n_concepts) 
     fig3 = px.treemap(
     plot_df_concepts.sort_values("Count", ascending=False), 
@@ -305,57 +411,95 @@ with tab_explore:
 
     st.plotly_chart(fig3, use_container_width=True)
 
-#---------- Recommendations Tab ----------------# 
+
+#---------- PERSONALIZATION TAB ----------------# 
 with tab_recs: 
-    st.subheader("Personalized skill recommendations")
+    st.subheader("Personalized Skill Requirements")
     st.markdown(
-        "Based on your **target industry domain**, **target machine learning specialization** (optional), "
-        "and the **experience level of the role you want to pursue** (not your current level), "
-        "we’ll suggest the core skills and practice projects to help you upskill and become competitive "
-        "for these positions."
+        "Based on your **target industry domain, career level, and machine learning specialization (optional)**, "
+        "a personalized skills checklist or phased roadmap for your desired ML job will be generated."
     )
-    col1, col2, col3, col4 = st.columns([2, 2, 1.6,1.6])
+    col1, col2, col3, col4 = st.columns([2, 2, 1.6, 1.6])
 
     with col1: 
         # defaults to the same domain picked previously 
+        with stylable_container(
+        key="industrydomain_step1",
+        css_styles="""
+        {
+            background: #5aae94ff;                 /* light teal */
+            border: 1px solid #E5E7EB;           /* subtle border */
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 4px 0 12px 0;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+            color: #ffff                         /* white text*/ 
+        }
+        """
+        ): 
+            st.markdown('<center><strong>Step 1. Industry Domain</strong></center>',unsafe_allow_html=True)
+            st.markdown("") 
+            st.markdown("")
         rec_domain = st.selectbox(
-            "Industry Domain",
+            "Select Target Industry Domain",
             domains_list,
             index = domains_list.index(selected_domain) if selected_domain in domains_list else 0,
-            key = "rec_domain",
-            help="Pick the industry domain you're aiming to work in."
+            key = "rec_domain"
         )
     with col2: 
+        with stylable_container(
+        key="careerlevel_step2",
+        css_styles="""
+        {
+            background: #4f947eff;                 /* slightly darker teal */
+            border: 1px solid #E5E7EB;           /* subtle border */
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 4px 0 12px 0;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+            color: #ffff                         /* white text*/ 
+        }
+        """
+        ): 
+            st.markdown('<center><strong>Step 2. Career Level</strong></center>',unsafe_allow_html=True) 
+            st.markdown("")
+            st.markdown("")
         target_level=st.radio(
-            "Target experience level",
+            "Select Target Career Level",
             ["Early Career", "Mid-Level", "Senior"],
             horizontal=True,
             key="rec_experience",
-            help="Select the level of the **future** role you want to land, NOT your current level."
+            help=(
+            "Select the level of the **future ML role** you want to pursue, NOT your current level.\n\n"
+            "- **Early Career (0 to <2 years of industry experience)**: Includes titles such as "
+            "*ML Intern*, *Associate AI Scientist*, and *ML Engineer*. Typical tasks include "
+            "implementing models and supporting senior staff on projects. "
+            "(If you want internship-specific guidance, also select the **Internship** option).\n"
+
+            "- **Mid-Level (2 to <5 years of industry experience)**: Includes titles such as "
+            "*AI Scientist II/III* and *Lead ML Engineer*. Typical tasks include independently training/tuning models, "
+            "collaborating with software engineers for deployment, and mentoring junior members.\n"
+
+            "- **Senior (5+ years of industry experience):** Includes titles such as *Senior ML Engineer*, "
+            "*Principal AI Scientist*, or *Executive-track ML roles*. Typical tasks include leading ML projects, "
+            "driving research or architecture decisions, "
+             "and managing/mentoring teams.\n\n"
+            "⚠️ Job titles and expectations vary by company, so treat these as general ML career guidelines."
+            )
         )
 
         
         targetting_intern = st.checkbox(
-            "Target internship",
+            "Internship",
             key="targetting_intern",
             disabled=(target_level != "Early Career"),
-            help="Check this if you're applying for an internship position."
+            help="Check this if you are seeking an internship position."
         )
         if target_level != "Early Career": 
             targetting_intern = False 
     
-            
     with col3: 
-        detail = st.radio(
-            "Detail level",
-            ["Essential (5 skills)", "Extended (10 skills)"],
-            index=0,
-            horizontal=True,
-            key="rec_detail",
-            help="Choose a concise core list or a longer plan."
-        )
-    
-    APPLICATION_AREAS = ["Natural Language Processing (NLP)",
+        APPLICATION_AREAS = ["Natural Language Processing (NLP)",
                          "Computer Vision",
                          "Speech & Audio Machine Learning",
                          "Multimodal Learning",
@@ -369,43 +513,164 @@ with tab_recs:
                          "Embedded and Edge Machine Learning",
                          "Machine Learning Operations (MLOps)",
                          ""]
-    with col4: 
+        with stylable_container(
+        key="mlspecialization_step3",
+        css_styles="""
+        {
+            background: #45816dff;                 /* darker teal */
+            border: 1px solid #E5E7EB;           /* subtle border */
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 4px 0 12px 0;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+            color: #ffff                         /* white text*/ 
+        }
+        """
+        ): 
+            st.markdown('<center><strong>Step 3. ML Specialization</strong></center>',unsafe_allow_html=True)
+            st.markdown("")
+            st.markdown("")
         type_of_ml = st.selectbox(
-        "Machine Learning Specialization (optional)",
+        "Select Target ML Specialization (optional)",
         APPLICATION_AREAS,
         index=None, # no preselection
         placeholder="Choose a specialization",
         key="rec_ml_types",
-        help="Select at most one specialization relevant to your machine learning interests or leave blank.")
+        help="Select one specialization relevant to your machine learning interests or leave blank.")
+    
+    with col4: 
+        with stylable_container(
+        key="outputstyle_step4",
+        css_styles="""
+        {
+            background: #3b6e5cff;                 /* darkest teal */
+            border: 1px solid #E5E7EB;           /* subtle border */
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 4px 0 12px 0;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+            color: #ffff                         /* white text*/ 
+        }
+        """
+        ): 
+            st.markdown('<center><strong>Step 4. Output Style</strong></center>',unsafe_allow_html=True)
+            st.markdown("")
+            st.markdown("")
+        output_style = st.radio(
+            "Select Output Style",
+            ["Skills checklist", "Roadmap (timeline)"],
+            horizontal=False,
+            key="rec_output_style",
+            help=(
+            "**Skills checklist**: 3–5 required skills, each with what to learn, why it matters, "
+            "a concrete mini-project idea, and 1–2 named resources.\n\n"
+            "**Roadmap (timeline)**: Phased plan over your chosen prep window with weekly/monthly goals, "
+            "project ideas and resources."
+            )
+        )
 
-    top_n_recs = 5 if detail.startswith("Essential") else 10 
+        fixed_months=None 
+        if output_style == "Roadmap (timeline)": 
+            fixed_months = st.slider(
+                "Skills preparation window (months)",
+                min_value = 1, max_value = 24, value = 6, step=1, 
+                help="How many months you want to allocate for preparation."
+            )
 
-    get_recs = st.button("Get recomendations", type="primary", key="rec_go")
+    get_recs = st.button("Generate output", type="primary", key="rec_go")
 
 
     if get_recs: 
         plan_slot = st.empty() # location where the answer will be rendered 
 
-        with st.spinner("Generating recommendations..."): 
+        with st.spinner("Generating output..."): 
 
-            # Build a simple prompt from the user's choices
-            target = "Internship" if targetting_intern else f"a {target_level} full-time role"
+            # Build the identity pieces 
+            role_label = "Internship" if targetting_intern else f"{target_level} full-time role"
+            spec_clause = f" with a focus on {type_of_ml}" if type_of_ml else ""
+            ml_clause = f"(i.e., {type_of_ml})" if type_of_ml else ""
 
 
-            user_prompt_parts = [
-                f"Target industry domain: {rec_domain}" 
-            ]
-            
-            if type_of_ml == "": # only if the user selected a category then you can add this to the user prompt
-                user_prompt_parts.append(f"Target machine learning specialization: {type_of_ml}")
+            #-------Retrieve vector content (top-k)-------# 
+            collection = get_collection() 
+            embedder, device = _load_embedder()
 
-            user_prompt_parts.append(f"Target role: {target}")
-            user_prompt_parts.append(f"In bullet points, list {top_n_recs} essential skills to learn next and 1 mini-project for each. "
-            "Keep it under 150 words.")
+            # Build the semantic query 
+            semantic_query = " | ".join(
+                p for p in [rec_domain, role_label, (type_of_ml or "").strip()] if p
+            )
 
-            system_hint = "You are a concise career coach."
-            user_prompt = "\n".join(user_prompt_parts)
-            full_prompt = f"{system_hint}\n\n{user_prompt}"
+            snippets = query_topk(collection, embedder, semantic_query)
+
+            #---------Assemble the Prompt-----------# 
+            headline = (
+            f"You are a concise, practical machine learning (ML) career coach. "
+            f"Generate the most specific, technically grounded guidance possible for preparing for a "
+            f"{role_label} in the {rec_domain} domain{spec_clause}."
+            )
+
+            user_prompt_parts = [headline]
+
+            # Append the context 
+            if snippets:
+                ctx = format_context(snippets)
+                user_prompt_parts.append(
+                "Use the following ML position descriptions as background signal ONLY. "
+                "Do NOT copy phrasing or expose metadata (e.g., seniority level, industry domain)."
+                "Incorporate ONLY concrete, task-relevant details (e.g., skills, tools)."
+                )
+                user_prompt_parts.append("Context (background only, NOT to be quoted):\n" + ctx)
+
+        
+            # Output-style guidance
+            if output_style == "Skills checklist":
+                user_prompt_parts.append(
+                    "\n Produce a **skills checklist** with 3 to 5 items. "
+                    "For each item, include: (1) what to learn, (2) why it matters **for this domain and/or ML specialization**, "
+                    "(3) one concrete mini-project and (4) 1 to 2 named resources "
+                    "(e.g., recommended certifications, courses, official docs)."
+                )
+            else:
+                # Roadmap
+                if fixed_months:
+                    user_prompt_parts.append(
+                        f"\n Create a **phased roadmap** to prepare in ~{fixed_months} months."
+                    )
+                else:
+                    user_prompt_parts.append(
+                        "\n Create a **phased roadmap** and estimate a realistic total prep time."
+                    )
+                user_prompt_parts.append(
+                    "Break down into phases (e.g., Foundations, Core Projects, Portfolio and Interview Prep). "
+                    "Specify weekly/monthly goals, concrete deliverables, and named resources (certifications, courses, official docs). "
+                    f"Tailor everything to machine learning in the chosen domain and, if provided, the specialization {ml_clause}."
+                )
+
+            # Precision + formatting constraints
+            user_prompt_parts.append(
+                "Hard rules: avoid generic advice; be domain-specific AND machine learning-specific; prefer actionable steps over descriptions; "
+                "Name resources explicitly. Format with headings and bullet points."
+                "Seniority assumptions: "
+                "If the target is Early Career (from Student/Intern), assume familiarity with Python syntax, Jupyter/Colab, basic NumPy/Pandas, "
+                 "intro ML concepts (linear/logistic regression, overfitting, train/test split), and exposure to one ML library (scikit-learn or PyTorch basics). "
+                "Do not re-teach these. "
+                "If the target is Mid-Level (from Early Career), assume proficiency with Python, NumPy/Pandas, Git, Linux/bash, virtual envs, "
+                "basic statistics/ML (train/val/test, cross-validation), PyTorch training loops, and basic cloud usage (S3/GCS, IAM basics). "
+                "Do not re-teach these. "
+                "If the target is Senior (from Mid-Level), assume mastery of model training/fine-tuning in PyTorch, code review and unit/integration testing, "
+                "CI/CD (GitHub Actions/GitLab CI), containerization (Docker), basic Kubernetes, cost-aware cloud deployment, "
+                "and common CV stacks (ResNet/EfficientNet/ViT/YOLO/Seg models). "
+                "Do not re-teach these. "
+                f"Focus ONLY on the delta (TARGET ROLE: {role_label}) required to advance to the target level."
+            )
+            # If no specialization selected, ask the model to make one (and disclose it)
+            if not type_of_ml:
+                user_prompt_parts.append(
+                    "If no ML specialization was provided, pick the most relevant one for this domain and state that assumption in one short line at the top."
+                )
+
+            full_prompt = "\n".join(user_prompt_parts)
+
             try: 
                 answer = ollama_generate(full_prompt)
             except Exception as e: 
@@ -413,13 +678,9 @@ with tab_recs:
                 st.stop()
         
         with plan_slot.container(): 
-            st.markdown("### Suggested plan")
             st.markdown(answer)
 
 
-# TODO: Setup the RAG from ChromaDB and refine your prompt!
-
 # Update requirements.txt 
 
-# Trial user run with parents of the dashboard 
 
