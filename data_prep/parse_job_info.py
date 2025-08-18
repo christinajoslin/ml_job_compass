@@ -169,6 +169,9 @@ filtered_df = df[['company_description', 'job_description_text']]
 def extract_job_info(company_info, job_info, prompt, max_retries=7, delay=0.5):
     """
     Extracts structured job info from raw text via LLM, retrying if schema validation fails.
+    Returns:
+      dict: Parsed job information as a Python dict on success.
+      None: If all retries are exhausted or parsing/validation fails on every attempt.
     """
     base_prompt_text = prompt.format(company_description=company_info, job_description=job_info)
 
