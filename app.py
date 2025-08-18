@@ -1,40 +1,62 @@
-# Run as streamlit run app.py
+""" 
+Script used to run the "ML Compass" Streamlit app. 
 
-import streamlit as st 
-from streamlit_extras.stylable_container import stylable_container 
-import ast 
-import os
-import pandas as pd 
-from collections import Counter
-import plotly.express as px 
-from datetime import datetime 
-import requests 
-from chroma_store import get_collection, _load_embedder, query_topk, format_context
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-from dotenv import load_dotenv
+Author: Christina Joslin 
+Date: 8/18/2025 
+Purpose:
+    - Explore top ML skills by industry domain
+    - Personalize a skills checklist or a phased roadmap for a target role
+    - Optionally condition guidance on an ML specialization and prep window
+Notes:
+    - Run locally using streamlit run app.py
+    - Uses Ollama for LLM text generation (MODEL_ID + OLLAMA_BASE_URL env vars)
+    - Uses a local Chroma vector store to pull job-snippet context for prompts
+"""
 
-load_dotenv(override=False)  # (Only applicable to local hosting) looks for a .env in the current working directory
+#--------------- Load Libraries --------------------
 
-DEFAULT_OLLAMA_URL = "http://host.docker.internal:11434"  # for local runs with not container 
+#--------------- Load Libraries --------------------
+import streamlit as st                                              # Core Streamlit UI framework for building the web app
+from streamlit_extras.stylable_container import stylable_container  # Adds CSS-stylable containers to Streamlit
+import ast                                                          # Safely parse Python literals (e.g., stringified lists) back into Python objects
+import os                                                           # Interact with the operating system (env vars, paths, etc.)
+import pandas as pd                                                 # Data manipulation and analysis (DataFrames, CSV I/O)
+from collections import Counter                                     # Efficient frequency counting of iterable elements
+import plotly.express as px                                         # High-level interactive plotting (scatter, bar, treemap, etc.)
+from datetime import datetime                                       # Work with dates/times and format them for display
+import requests                                                     # HTTP client for calling web APIs (e.g., Ollama)
+from chroma_store import get_collection, _load_embedder, query_topk, format_context  # Vector DB helpers:
+#   - get_collection: connect to the Chroma collection
+#   - _load_embedder: load the embedding model (+ device)
+#   - query_topk: retrieve top-K relevant text snippets
+#   - format_context: format snippets into a prompt-ready context string
+from requests.adapters import HTTPAdapter                           # Mount adapters on requests.Session for custom transport/retry behavior
+from urllib3.util.retry import Retry                                # Define retry/backoff policy for transient HTTP errors
+from dotenv import load_dotenv                                      # Load environment variables from a local .env file
 
+
+#--------------- Environment Variables --------------------
+
+# Load any KEY=VALUE pairs in local .env file into the process environment
+load_dotenv(override=False)  # override=False ensures existing env vars (e.g., from Docker) are NOT overwritten 
+
+
+#--------------- Defaults For Local Ollama --------------------
+
+# If OLLAMA_BASE_URL is not set, fall back to local host default. 
+# host.docker.internal resolves from inside Docker to the host machine.
+DEFAULT_OLLAMA_URL = "http://host.docker.internal:11434"  
+
+#--------------- Cached Ollama HTTP Client --------------------
+
+# Ensures the HTTP Session (with retry/backoff) is only created once per session
 @st.cache_resource 
 def _ollama_client():
     """
-    Build and cache an HTTP client + config for talking to the Ollama server.
+    Builds and caches an HTTP client + config for talking to the Ollama server.
 
     Returns:
       (base_url: str, model_id: str, session: requests.Session)
-
-    How config is resolved:
-    - OLLAMA_BASE_URL: where the Ollama server is.
-        * Compose (Option B): http://ollama:11434   (set in docker-compose.yml)
-        * Local host:        http://localhost:11434 (export in your shell or .env)
-    - MODEL_ID: which model Ollama should use (e.g., 'granite3.3:8b', 'llama3.1:8b-instruct').
-
-    Why cache?
-    - Streamlit reruns the script on each UI change; caching avoids recreating the Session.
-    - The requests.Session below has retry/backoff for minor transient errors (429/502/503/504).
     """
     base_url = os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_URL)
     model_id = os.getenv("MODEL_ID")
@@ -42,31 +64,28 @@ def _ollama_client():
     # Create a resilient HTTP session with basic retry/backoff.
     session = requests.Session()
     retry = Retry(
-        total=3,                  # up to 3 retries on certain status codes
-        backoff_factor=0.5,       # 0s, 0.5s, 1s, 2s...
-        status_forcelist=[429, 502, 503, 504],
-        allowed_methods=["GET", "POST"],
+        total=3,                  # max 3 retries 
+        backoff_factor=0.5,       # wait progressively longer between retries (0s, 0.5s, 1s, 2s...) 
+        status_forcelist=[429, 502, 503, 504], # retry ONLY if these codes are returned 
+        allowed_methods=["GET", "POST"],       # retry applies to these request types (GET = reads, POST = submissions)
     )
+
+    # Mounts the adapter for both http and https 
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
 
     return base_url, model_id, session
 
+#--------------- Ollama Single-Shot Text Generation --------------------
+
 def ollama_generate(prompt, temperature = 0.3):
     """
-    Call Ollama's /api/generate and return the generated text.
-
-    Args:
-      prompt: The text you want the model to respond to.
-      temperature: Sampling temperature (higher = more random).
-
-    Behavior:
-      - Uses OLLAMA_BASE_URL and MODEL_ID from env (or sensible defaults).
-      - Works in both Compose (talks to http://ollama:11434) and non-Compose (set localhost).
-
+    Calls Ollama's /api/generate endpoint and returns text. Expects MODEL_ID to be
+    set. Temperature defaults to 0.3. 
     Returns:
-      The 'response' string from Ollama.
+        str: The generated text from the model (value of the "response" field in the JSON). 
+              If missing, returns an empty string "".
     """
     base_url, model_id, session = _ollama_client()
 
@@ -74,17 +93,22 @@ def ollama_generate(prompt, temperature = 0.3):
         "model": model_id,
         "prompt": prompt,
         "temperature": temperature,
-        "stream": False,          # stream=False returns a single JSON at the end
+        "stream": False,          
     }
     resp = session.post(f"{base_url}/api/generate", json=payload, timeout=600)
     resp.raise_for_status()
     data = resp.json()
     return data.get("response", "")
 
+#--------------- App Metadata (Author & Last Update Timestamp) --------------------
+
+# Displayed in the hero header
 AUTHOR = "Christina Joslin"
-UPDATED = datetime.now().strftime("%b %d, %Y")
+UPDATED = datetime(2025, 8, 18).strftime("%b %d, %Y") 
 
 #--------------- Initial Preprocessing------------------------# 
+
+# Load the CSV of parsed job postings 
 df = pd.read_csv("parsed_1000_ml_jobs_us.csv")
 
 # Columns that contain string representations of lists
@@ -94,37 +118,40 @@ list_columns = ['programming_languages', 'type_of_ml', 'libraries_and_tools', 'c
 for col in list_columns:
     df[col] = df[col].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
 
-# Spell out the acronyms in the cloud_platforms column 
-
+# Expand cloud platform acronyms to full names
 mapping = {
     "AWS": "Amazon Web Services (AWS)",
     "GCP": "Google Cloud Platform (GCP)",
     "Azure": "Microsoft Azure"
 }
+s = df["cloud_platforms"].explode()  # expand list elements into multiple rows 
+s = s.astype(str).str.strip() # convert to a string
+s = s.replace(mapping, regex=False) # replace acronyms (exact swaps only) 
+df["cloud_platforms"] = s.groupby(level=0).agg(list) # group back into a list per original row 
 
-s = df["cloud_platforms"].explode() 
-s = s.astype(str).str.strip()
-s = s.replace(mapping, regex=False) # exact swaps only 
-
-# Reassemble list 
-
-df["cloud_platforms"] = s.groupby(level=0).agg(list)
 
 # Create a new column (frameworks and tools) that merges libraries and tools with cloud platforms 
+# Note: This powers the "Tools & Platforms" chart so cloud providers appear alongside libraries such as PyTorch 
 df["frameworks_tools"] = df.apply(
     lambda r: (r.get("libraries_and_tools", []) + r.get("cloud_platforms", [])),
     axis=1
 )
 
-# ---- Page setup ----
+
+#--------------- Streamlit Page Setup --------------------
+
+# Title, layout, favicon. Then hero header metadata is rendered wiht custom CSS 
 st.set_page_config(page_title="ML Job Compass", layout="wide", page_icon="🧭")
 
-TITLE   = "🧭ML Job Compass"  # <-- pick one of the titles above
+TITLE   = "🧭ML Job Compass"  
 SLOGAN  = "Get the machine learning job you want by learning the skills to get there."
-AUTHOR  = AUTHOR            # keep your existing variables
+AUTHOR  = AUTHOR            
 UPDATED = UPDATED
 
-# ---- One-time CSS (fonts + palette + hero) ----
+#--------------- One-time CSS (Fonts, Palette, Hero, Cards) --------------------
+
+# Customizes typogrpahy, colors, hero banner, and a soft "How to use" card.
+# Note: unsafe_allow_html=True enables raw <style> injection 
 st.markdown("""
 <style>
 /* Fonts */
@@ -194,9 +221,11 @@ st.markdown("""
   font-size: 15px;
 }
 </style>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=True) 
 
-# ---- Hero header (title + slogan + meta) ----
+#--------------- Hero Header (Title + Slogan + Meta) --------------------
+
+# Renders the large banner with title, slogan, and author/timestamp
 st.markdown(
     f"""
     <div class="hero">
@@ -208,7 +237,9 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# ---- How to use it (styled card) ----
+#--------------- "How to Use" Card --------------------
+
+# Brief instructions to orient users: exploration vs. personalization tabs. 
 st.markdown(
     """
     <div class="card">
@@ -224,29 +255,36 @@ st.markdown(
 
 st.divider()
 
-#---------- Count of Domains-------------# 
+#--------------- Domain List & Helpers --------------------
+
+# Builds a frequency table of industry domains, then keep only domains with at least 10 postings.  
 domain_counts = Counter(d for doms in df["domain"] for d in doms if d != "Not mentioned")
 domains_list = [d for d, c in domain_counts.items() if c >= 10] # If the count exceeds 10 data points 
 
+# Safe iterator over list-like cells, skipping blanks and "Not mentioned"
 def safe_item(series): 
     for x in series: 
         for v in (x or []): 
             if v and v != "Not mentioned": 
                 yield v 
 
+# Turn a select column into a (Item, Count) dataframe for top-N charting 
 def plotify_df(subset, column_name, top_n): 
     items = list(safe_item(subset[column_name]))  
     counts = Counter(items)
     top_items = counts.most_common(top_n)
     return pd.DataFrame(top_items, columns =["Item","Count"])
-# --- Define the page tabs-----# 
+
+#--------------- Tabs & Tab Styling --------------------
+
+# Create two main tabs: "Exploration" and "Personalization" with CSS tweaks for improved readability (i.e., larger font, padding)
 
 if "section" not in st.session_state:
     st.session_state.section = "Exploration"  # default
 
 
 tab_explore, tab_recs = st.tabs(["Exploration", "Personalization"])
-# put this once (before/after tabs — either is fine)
+
 st.markdown("""
 <style>
 /* Increase tab label font size */
@@ -266,9 +304,16 @@ div[data-testid="stTabs"] button[role="tab"] {
 </style>
 """, unsafe_allow_html=True)
 
-#------------- EXPLORATION TAB ------------------# 
+#========================================================
+#                 EXPLORATION TAB
+#========================================================
+
+# Interactively explore top Programming Languages, Tools/Cloud, and ML Specializations 
+# for either (a) a specific industry domain, or (b) across all domains. 
+# 
 with tab_explore: 
 
+    #------ Intro copy for the exploration controls ------
     st.subheader("Explore Top ML Job Skills by Industry Domain")
     st.markdown(
     """
@@ -276,10 +321,15 @@ with tab_explore:
     """
     )
     
+    #------ Domain scope toggle ------
+    # If checked: aggregate across ALL domains (disable domain picker).
+    # If unchecked: allow user to pick one domain.
     show_overall = st.toggle(
     "Show for all industry domains",
     value=False
     )
+
+    # Styled container for domain picker (disabled if "all domains" is on).
     with stylable_container(
         key="lang_controls_card_1",
         css_styles="""
@@ -297,8 +347,9 @@ with tab_explore:
         st.markdown('<strong>Step 1. Select an industry domain.</strong>', unsafe_allow_html=True)
         selected_domain = st.selectbox("", domains_list, index=0, disabled=show_overall)
     
-      #----------------Aggregate tools and platforms for the selected domain (if applicable)----------------------# 
+    #---------------- Domain subset selection ----------------------
 
+    # Build the dataframe subset based on the toggle above, and set labels for chart titles 
     if show_overall: 
         subset = df.copy() 
         scope_label="All Industry Domains"
@@ -311,10 +362,12 @@ with tab_explore:
     st.divider() 
     st.subheader(scope_label)
 
-    #------------- Show Visualizations for the Given Domain ----------------------# 
+    #------------- Visualizations for the current scope ----------------------
+    # Figure 1: Top Programming Languages (dot plot with stems)
+    # Figure 2: Top Tools & Cloud Platforms (horizontal bar chart)
+    # Figure 3: Top ML Specializations (treemap)
 
-    # ------------------ Figure 1 -------------------------# 
-    
+    # ------------------ Figure 1: Programming Languages ---------------------
     with stylable_container(
         key="lang_controls_card",
         css_styles="""
@@ -335,7 +388,7 @@ with tab_explore:
     lang_df = plot_df_languages.sort_values("Count", ascending=False).copy()
 
 
-    # one trace per language so stems can match the dot color
+    # Build a stemmed dot plot where each language is a trace; stems match dot 
     fig1 = px.scatter(
     lang_df, x="Count", y="Item",
     color="Item",
@@ -343,14 +396,14 @@ with tab_explore:
     color_discrete_sequence=px.colors.qualitative.Set2
     )
 
-    # dots + labels
+    # Show dots + labels (counts as text)
     fig1.update_traces(
     mode="markers+text",
     marker=dict(size=18, line=dict(width=1, color="white")),
     textposition="middle right",
     )
 
-    # per-trace stems back to zero, colored to match each dot
+    # Add “stems” back to zero for visual clarity; color stems per language trace.
     for tr in fig1.data:
         xval = float(tr.x[0])
         tr.update(error_x=dict(
@@ -359,7 +412,7 @@ with tab_explore:
         ),
         hovertemplate=f"<b>{tr.name}</b><br>Count: {int(xval)}<extra></extra>")
 
-    # keep explicit order (Top #1 at top)
+    # Keep order = sorted by count; put Top #1 at top
     fig1.update_yaxes(categoryorder="array", categoryarray=lang_df["Item"].tolist())
 
     fig1.update_layout(
@@ -369,14 +422,14 @@ with tab_explore:
     showlegend=False, margin=dict(l=0, r=0, t=60, b=0)
     )   
 
+    # Reverse y for descending
     fig1.update_yaxes(autorange="reversed")
 
     st.plotly_chart(fig1, use_container_width=True)
 
     st.divider()
 
-
-    # ------------------- Figure 2 --------------------------# 
+    # ------------------- Figure 2: Tools & Cloud Platforms ------------------
     with stylable_container(
     key="tools_controls_card",
     css_styles="""
@@ -393,6 +446,8 @@ with tab_explore:
         st.markdown('<center><strong>Step 3.</strong> Use slider to select up to 10 top tools & cloud platforms.</center>',unsafe_allow_html=True)
         top_n_tools = st.slider("", 3, 10,5, key = "ntools")
     plot_df_tools = plotify_df(subset, "frameworks_tools",top_n_tools)
+
+    # Horizontal bars, colored by item, with value labels and simple hover text.
     fig2 = px.bar(
     plot_df_tools.sort_values("Count", ascending=False),
     x="Count", y="Item", orientation="h",
@@ -412,7 +467,7 @@ with tab_explore:
 
     st.divider() 
 
-# -------------------- Figure 3 -----------------------# 
+# -------------------- Figure 3: ML Specializations -----------------------
     with stylable_container(
         key="ml_concepts_controls_card",
         css_styles="""
@@ -429,13 +484,14 @@ with tab_explore:
         st.markdown('<center><strong>Step 4.</strong> Use slider to select up to 10 top machine learning specializations.</center>',unsafe_allow_html=True)
         top_n_concepts = st.slider("", 3, 10, 5, key = "nconcepts")
     plot_df_concepts = plotify_df(subset, "type_of_ml", top_n_concepts) 
+
+    # Treemap with a root label (domain or "All") and rectangles sized by counts.
     fig3 = px.treemap(
     plot_df_concepts.sort_values("Count", ascending=False), 
     path=[px.Constant(root_label), "Item"], values="Count",
     color="Count",
     color_continuous_scale=px.colors.sequential.Mint
     )
-
 
     fig3.update_traces(
     textinfo="label+value", 
@@ -452,17 +508,26 @@ with tab_explore:
     st.plotly_chart(fig3, use_container_width=True)
 
 
-#---------- PERSONALIZATION TAB ----------------# 
+#========================================================
+#                PERSONALIZATION TAB
+#========================================================
+# Collect user preferences (domain, career level, specialization, output style),
+# retrieve relevant job-snippet context from a Chroma vector store,
+# generate a tailored checklist or roadmap using the Ollama LLM,
+# and render the result.
+
 with tab_recs: 
     st.subheader("Personalized Skill Requirements")
     st.markdown(
         "Based on your **target industry domain, career level, and machine learning specialization (optional)**, "
         "a personalized skills checklist or phased roadmap for your desired ML job will be generated."
     )
+
+      #------ Four-column control layout ------
     col1, col2, col3, col4 = st.columns([2, 2, 1.6, 1.6])
 
+    # Step 1: Target Industry Domain (defaults to previously selected domain from "Exploration" tab)
     with col1: 
-        # defaults to the same domain picked previously 
         with stylable_container(
         key="industrydomain_step1",
         css_styles="""
@@ -486,6 +551,7 @@ with tab_recs:
             index = domains_list.index(selected_domain) if selected_domain in domains_list else 0,
             key = "rec_domain"
         )
+    # Step 2: Career Level (+ optional Internship)
     with col2: 
         with stylable_container(
         key="careerlevel_step2",
@@ -504,6 +570,7 @@ with tab_recs:
             st.markdown('<center><strong>Step 2. Career Level</strong></center>',unsafe_allow_html=True) 
             st.markdown("")
             st.markdown("")
+         # Choose target seniority for the *future* role (assumptions encoded in the prompt later).
         target_level=st.radio(
             "Select Target Career Level",
             ["Early Career", "Mid-Level", "Senior"],
@@ -528,7 +595,7 @@ with tab_recs:
             )
         )
 
-        
+        # Internship toggle appears only for Early Career targeting.
         targetting_intern = st.checkbox(
             "Internship",
             key="targetting_intern",
@@ -537,7 +604,7 @@ with tab_recs:
         )
         if target_level != "Early Career": 
             targetting_intern = False 
-    
+    # Step 3: Optional ML Specialization
     with col3: 
         APPLICATION_AREAS = ["Natural Language Processing (NLP)",
                          "Computer Vision",
@@ -570,6 +637,7 @@ with tab_recs:
             st.markdown('<center><strong>Step 3. ML Specialization</strong></center>',unsafe_allow_html=True)
             st.markdown("")
             st.markdown("")
+        # Specialization picker (optional); left blank = model will infer a relevant one.
         type_of_ml = st.selectbox(
         "Select Target ML Specialization (optional)",
         APPLICATION_AREAS,
@@ -577,7 +645,7 @@ with tab_recs:
         placeholder="Choose a specialization",
         key="rec_ml_types",
         help="Select one specialization relevant to your machine learning interests or leave blank.")
-    
+    # Step 4: Output Style (Checklist vs Roadmap) + Prep Window (for Roadmap)
     with col4: 
         with stylable_container(
         key="outputstyle_step4",
@@ -596,6 +664,7 @@ with tab_recs:
             st.markdown('<center><strong>Step 4. Output Style</strong></center>',unsafe_allow_html=True)
             st.markdown("")
             st.markdown("")
+        # Choose between a compact skills checklist or a time-phased roadmap.
         output_style = st.radio(
             "Select Output Style",
             ["Skills checklist", "Roadmap (timeline)"],
@@ -608,7 +677,7 @@ with tab_recs:
             "project ideas and resources."
             )
         )
-
+        # For roadmaps, let the user define the prep window in months.
         fixed_months=None 
         if output_style == "Roadmap (timeline)": 
             fixed_months = st.slider(
@@ -616,9 +685,16 @@ with tab_recs:
                 min_value = 1, max_value = 24, value = 6, step=1, 
                 help="How many months you want to allocate for preparation."
             )
-
+    # Primary action: trigger guidance generation
     get_recs = st.button("Generate output", type="primary", key="rec_go")
 
+    #--------------- Guidance Generation Pipeline --------------------
+    # When clicked:
+    # 1) Build human-readable labels (role, specialization clause).
+    # 2) Retrieve top-K relevant snippets from the vector store (domain/level/spec).
+    # 3) Compose a strict, domain- and seniority-aware prompt with formatting rules.
+    # 4) Call Ollama to generate either a checklist or a roadmap.
+    # 5) Render markdown into the reserved slot.
 
     if get_recs: 
         plan_slot = st.empty() # location where the answer will be rendered 
@@ -631,7 +707,9 @@ with tab_recs:
             ml_clause = f"(i.e., {type_of_ml})" if type_of_ml else ""
 
 
-            #-------Retrieve vector content (top-k)-------# 
+            #------- Retrieve vector content (top-k) ------------------
+            # Connect to the Chroma collection and the embedder, then query with a
+            # semantic string composed of domain + target role + specialization.
             collection = get_collection() 
             embedder, device = _load_embedder()
 
@@ -642,7 +720,8 @@ with tab_recs:
 
             snippets = query_topk(collection, embedder, semantic_query)
 
-            #---------Assemble the Prompt-----------# 
+             #--------- Assemble the Prompt ----------------------------
+            # Start with a concise, practical "career coach" persona and explicit task.
             headline = (
             f"You are a concise, practical machine learning (ML) career coach. "
             f"Generate the most specific, technically grounded guidance possible for preparing for a "
@@ -651,7 +730,8 @@ with tab_recs:
 
             user_prompt_parts = [headline]
 
-            # Append the context 
+            # Append the context (if any). I instruct the model to use only concrete details,
+            # not to quote or reveal metadata from the job snippets directly. 
             if snippets:
                 ctx = format_context(snippets)
                 user_prompt_parts.append(
@@ -662,7 +742,7 @@ with tab_recs:
                 user_prompt_parts.append("Context (background only, NOT to be quoted):\n" + ctx)
 
         
-            # Output-style guidance
+            # Output-style guidance (Checklist vs Roadmap)
             if output_style == "Skills checklist":
                 user_prompt_parts.append(
                     "\n Produce a **skills checklist** with 3 to 5 items. "
@@ -671,7 +751,7 @@ with tab_recs:
                     "(e.g., recommended certifications, courses, official docs)."
                 )
             else:
-                # Roadmap
+                # Roadmap variant with either a fixed or estimated prep window.
                 if fixed_months:
                     user_prompt_parts.append(
                         f"\n Create a **phased roadmap** to prepare in ~{fixed_months} months."
@@ -686,7 +766,7 @@ with tab_recs:
                     f"Tailor everything to machine learning in the chosen domain and, if provided, the specialization {ml_clause}."
                 )
 
-            # Precision + formatting constraints
+            # Precision & formatting constraints + seniority assumptions
             user_prompt_parts.append(
                 "Hard rules: avoid generic advice; be domain-specific AND machine learning-specific; prefer actionable steps over descriptions; "
                 "Name resources explicitly. Format with headings and bullet points."
@@ -703,20 +783,21 @@ with tab_recs:
                 "Do not re-teach these. "
                 f"Focus ONLY on the delta (TARGET ROLE: {role_label}) required to advance to the target level."
             )
-            # If no specialization selected, ask the model to make one (and disclose it)
+            # If no specialization selected, ask the model to infer a suitable one and disclose it.
             if not type_of_ml:
                 user_prompt_parts.append(
                     "If no ML specialization was provided, pick the most relevant one for this domain and state that assumption in one short line at the top."
                 )
-
+            # Join the prompt parts into one instruction string.
             full_prompt = "\n".join(user_prompt_parts)
 
+            # Call Ollama. Any exception is surfaced as a Streamlit error.
             try: 
                 answer = ollama_generate(full_prompt)
             except Exception as e: 
                 st.error(f"Oops - couldn't get recommendations: {e}")
                 st.stop()
-        
+        # Render the generated markdown into the reserved slot.
         with plan_slot.container(): 
             st.markdown(answer)
 
