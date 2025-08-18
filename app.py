@@ -12,9 +12,6 @@ Notes:
     - Uses Ollama for LLM text generation (MODEL_ID + OLLAMA_BASE_URL env vars)
     - Uses a local Chroma vector store to pull job-snippet context for prompts
 """
-
-#--------------- Load Libraries --------------------
-
 #--------------- Load Libraries --------------------
 import streamlit as st                                              # Core Streamlit UI framework for building the web app
 from streamlit_extras.stylable_container import stylable_container  # Adds CSS-stylable containers to Streamlit

@@ -1,24 +1,53 @@
-import ast 
-import os 
+"""
+Script used to generate the Chroma vector database (DB) for the "ML Job Compass" app.
 
-import chromadb
-from chromadb.config import Settings
-import pandas as pd
-import torch
-from sentence_transformers import SentenceTransformer
+Author: Christina Joslin
+Date: 8/18/2025
+Purpose:
+    - Normalize and ingest ML job data into a persistent Chroma collection
+    - Provide helpers to load the embedder and query top-K matches
+    - Format retrieved snippets into prompt-ready context blocks
+Notes:
+    - Run once with: python chroma_store.py
+    - Embedding model: sentence-transformers/all-MiniLM-L6-v2 (CPU/CUDA auto)
+    - Persistent path: ./chroma_store
+    - Collection name: ml_jobs
+"""
+#--------------- Load Libraries --------------------
+import ast                                              # Safely parse Python literals (e.g., stringified lists) back into Python objects
+import chromadb                                         # ChromaDB client (persistent vector database)
+from chromadb.config import Settings                    # Client configuration (e.g., allow_reset, persistence path)
+import pandas as pd                                     # Data manipulation and CSV I/O
+import torch                                            # Detect CUDA vs CPU for embedding computation
+from sentence_transformers import SentenceTransformer   # Sentence embedding model loader/encoder
 
-
+#--------------- Configuration Constants --------------------
+# Folder where Chroma will keep/lookup its persistent collection data.
 CHROMA_DIR = "./chroma_store"
+# Name of the collection storing ML job embeddings. 
 COLLECTION = "ml_jobs"
+# Sentence-transformers model used to embed documents and queries.
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 #----------------- Utility Functions------------------------# 
 def safe_str(x):
+    """
+    Converts a value into a metadata-safe string.
+
+    Returns:
+      A comma-joined string for lists, a string for scalars, or None.
+    """
     if isinstance(x, list):
         return ", ".join(str(v) for v in x)
     return str(x) if x is not None else None
 
 def embedding_string(row):
+    """
+    Builds a compact, information-dense text block for a single job row.
+
+    Returns:
+      A single string representing the row to be embedded.
+    """
     return (
         f"Seniority Level: {row.get('seniority_level')}\n"
         f"Internship: {row.get('internship')}\n"
@@ -31,15 +60,33 @@ def embedding_string(row):
     ).strip()
 
 def _load_embedder():
+    """
+    Loads the sentence-transformers model on CUDA if available, else CPU.
+
+    Returns:
+      (embedder: SentenceTransformer, device: str)
+    """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     emb = SentenceTransformer(EMBEDDING_MODEL, device=device)
     return emb, device
 
 def get_collection():
+    """
+    Opens or creates the persistent Chroma collection.
+
+    Returns:
+      The Chroma collection object.
+    """
     client = chromadb.PersistentClient(path=CHROMA_DIR, settings=Settings(allow_reset=False))
     return client.get_or_create_collection(COLLECTION)
 
 def query_topk(collection, embedder, q, k = 5):
+    """
+    Runs a semantic nearest-neighbor query over the collection.
+
+    Returns:
+      A list of dictionaries with keys: 'text', 'meta', and 'distance'.
+    """
     """Return top-k matches as list of dicts with text/meta/distance."""
     if not (q or "").strip():
         return []
@@ -54,6 +101,12 @@ def query_topk(collection, embedder, q, k = 5):
     return out
 
 def format_context(snippets, max_chars_per=1000):
+    """
+    Formats retrieved snippets into a compact, prompt-ready context block.
+
+    Returns:
+      A newline-joined string of labeled snippets.
+    """
     """Format snippets into a compact 'Context' block."""
     lines = []
     for i, s in enumerate(snippets, 1):
@@ -65,8 +118,24 @@ def format_context(snippets, max_chars_per=1000):
     return "\n\n".join(lines)
 
 #---------------- Ingestion (Run ONCE)--------------# 
+# ingest_csv:
+#   1) Read the CSV containing parsed ML job postings.
+#   2) Convert stringified lists back into lists (robust to edge cases).
+#   3) Expand cloud platform acronyms (AWS/GCP/Azure) to full names.
+#   4) Create "frameworks_tools" = libraries_and_tools + cloud_platforms (per row).
+#   5) Build three parallel arrays:
+#        ids  -> stable unique ids per row (e.g., "job-42")
+#        docs -> embedding strings (see embedding_string)
+#        metas-> flattened, human-readable metadata to accompany each doc
+#   6) Encode docs in batches and upsert into the persistent Chroma collection.
 
 def ingest_csv(csv_path="parsed_1000_ml_jobs_us.csv", batch=64):
+    """
+    Ingests a CSV of ML job postings into a persistent Chroma collection.
+
+    Returns:
+      None (prints progress and upserts embeddings/metadata in batches).
+    """
     df = pd.read_csv(csv_path)
 
     list_columns = [
@@ -75,6 +144,7 @@ def ingest_csv(csv_path="parsed_1000_ml_jobs_us.csv", batch=64):
     ]
 
     # Parse stringified lists
+    # _to_list is defensive: handles true lists, "[...]" strings, and scalars/missing.
     for col in list_columns:
         def _to_list(x):
             if isinstance(x, list):
@@ -91,11 +161,15 @@ def ingest_csv(csv_path="parsed_1000_ml_jobs_us.csv", batch=64):
             return []
         df[col] = df[col].apply(_to_list)
 
+    # Expand cloud acronyms to full names (consistency with front-end display).
     mapping = {"AWS": "Amazon Web Services (AWS)", "GCP": "Google Cloud Platform (GCP)", "Azure": "Microsoft Azure"}
     df["cloud_platforms"] = df["cloud_platforms"].apply(lambda xs: [mapping.get(str(x).strip(), str(x).strip()) for x in xs])
 
+    # Merge frameworks/tools with cloud platforms so retrieval can match either class of skill.
     df["frameworks_tools"] = df.apply(lambda r: (r.get("libraries_and_tools", []) + r.get("cloud_platforms", [])), axis=1)
 
+    # Build parallel arrays for Chroma upsert.
+    # ids: unique per row; docs: the embedding strings; metas: flattened metadata
     ids, docs, metas = [], [], []
     for i, row in df.iterrows():
         ids.append(f"job-{i}")
@@ -112,9 +186,11 @@ def ingest_csv(csv_path="parsed_1000_ml_jobs_us.csv", batch=64):
             "source_row": int(i),
         })
 
+    # Initialize store + embedder (device reported for transparency).
     collection = get_collection()
     embedder, device = _load_embedder()
 
+    # Batch encode and upsert embeddings (normalize for cosine similarity stability).
     print(f"Ingesting {len(docs)} docs: collection '{COLLECTION}' @ {CHROMA_DIR} (device={device})")
     for start in range(0, len(docs), batch):
         batch_ids = ids[start:start+batch]
@@ -123,6 +199,7 @@ def ingest_csv(csv_path="parsed_1000_ml_jobs_us.csv", batch=64):
         embs = embedder.encode(batch_docs, batch_size=batch, normalize_embeddings=True).tolist()
         collection.upsert(ids=batch_ids, documents=batch_docs, embeddings=embs, metadatas=batch_meta)
 
+#--------------- Script Entry Point --------------------
 if __name__ == "__main__":
     # Run once to build the store
     ingest_csv()

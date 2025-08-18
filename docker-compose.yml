@@ -4,7 +4,7 @@ services:
     image: ml-job-compass:latest
     ports:
       - "8501:8501" 
-    gpus: all                                 # remove if you don't have an NVIDIA GPU 
+    gpus: all                                 # remove if you don't have a NVIDIA GPU 
     env_file:
       - .env
     environment:
