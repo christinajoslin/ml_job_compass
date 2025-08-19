@@ -103,15 +103,23 @@ streamlit run app.py
 
 ### **Personalization Tab**: 
 #### Select:
-#### (1) Industry domain
-#### (2) Target career level (Early Career/Mid-Level/Senior)
-#### (3) Optional ML specialization (e.g., Natural Language Processing (NLP), Machine Learning Operations (MLOps))
-#### (4) Output style (Skills checklist vs. Roadmap with a preparation window (up to 24 months))
+- Industry domain
+- Target career level (Early Career/Mid-Level/Senior)
+- Optional ML specialization (e.g., Natural Language Processing (NLP), Machine Learning Operations (MLOps))
+- Output style (Skills checklist vs. Roadmap with a preparation window (up to 24 months))
 #### After making your desired selections, click **Generate Output**. The app uses the vector store (RAG) & your selections to produce actionable, domain-specific guidance.
 
 > ❓Have any questions while making a selection? Check the **help icon** for additional information. 
 
 <img src="ml_job_compass_personalization.png">
+
+--- 
+
+## Troubleshooting 
+#### LLM errors/timeouts: 
+- Ensure `OLLAMA_BASE_URL` is reachable, your model is pulled (check using `ollama list`) and the Ollama server is running. 
+#### Docker image is too large/low disk:
+- Prune unused images/containers and ensure >20 GB free space: 
 
 --- 
 
