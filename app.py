@@ -378,7 +378,7 @@ with tab_explore:
         }
         """
     ):
-        st.markdown('<center><strong>Step 2.</strong> Use slider to select up to 10 top programming languages.</center>', unsafe_allow_html=True)
+        st.markdown('<center><strong>Step 2.</strong> Use slider to select up to top 10 programming languages.</center>', unsafe_allow_html=True)
         top_n_languages = st.slider("", 3, 10, 5, key = "nlanguages")
     
     plot_df_languages = plotify_df(subset, "programming_languages", top_n_languages)
@@ -440,7 +440,7 @@ with tab_explore:
     }
     """
     ):
-        st.markdown('<center><strong>Step 3.</strong> Use slider to select up to 10 top tools & cloud platforms.</center>',unsafe_allow_html=True)
+        st.markdown('<center><strong>Step 3.</strong> Use slider to select up to top 10 tools & cloud platforms.</center>',unsafe_allow_html=True)
         top_n_tools = st.slider("", 3, 10,5, key = "ntools")
     plot_df_tools = plotify_df(subset, "frameworks_tools",top_n_tools)
 
@@ -478,7 +478,7 @@ with tab_explore:
         }
         """
         ):   
-        st.markdown('<center><strong>Step 4.</strong> Use slider to select up to 10 top machine learning specializations.</center>',unsafe_allow_html=True)
+        st.markdown('<center><strong>Step 4.</strong> Use slider to select up to top 10 machine learning specializations.</center>',unsafe_allow_html=True)
         top_n_concepts = st.slider("", 3, 10, 5, key = "nconcepts")
     plot_df_concepts = plotify_df(subset, "type_of_ml", top_n_concepts) 
 
