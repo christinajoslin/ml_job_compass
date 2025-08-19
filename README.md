@@ -40,6 +40,20 @@ Are you a college student interested in getting involved in machine learning (ML
 
 ---
 
+## Container Architecture
+
+There are two ways to run the app, both relying on **Ollama running locally:**
+
+- **Option 1 (Docker Compose):**  
+  Runs a single container hosting the **Streamlit app**. The app makes HTTP calls to the **local Ollama server** (`OLLAMA_BASE_URL=http://localhost:11434`) on your machine. 
+
+- **Option 2 (Local Python):**  
+  Runs the **Streamlit app locally** on your host machine (via `streamlit run app.py`). The app still makes HTTP calls to the **local Ollama server**.  
+
+In both cases, the Streamlit app and Ollama communicate over HTTP; the only difference is whether Streamlit runs **in a container** or **directly on your machine**.
+
+--- 
+
 ## Option 1 — Run via Docker Compose
 
 > ❗Ensure Ollama is running locally, your model is pulled, and `.env` is set up before starting.
@@ -60,7 +74,7 @@ docker compose up
 
 --- 
 
-## Option 2 - Run Locally (no containers)
+## Option 2 - Run Locally
 > ❗Ensure Ollama is running locally, your model is pulled, and `.env` is set up before starting.
 
 ### Step 1: Create & activate a virtual environment
@@ -74,10 +88,14 @@ streamlit run app.py
 ```
 
 ## Navigating the Dashboard 
-### **Exploration Tab**: 
+<img src="ml_job_compass_main_page.png">
+
+### **Exploration Tab**:
+<img src=""> 
 Use sliders to view up to the top 10 programming languages, tools & cloud platforms, and ML specializations by domain (or across all domains). Interactive Plotly visuals show counts from current postings.
 
 ### **Personalization Tab**: 
+<img src="ml_job_compass_personalization.png">
 
 Select: 
 - Industry domain 
