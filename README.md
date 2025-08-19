@@ -3,8 +3,8 @@
 **Author:** Christina Joslin
 
 Are you a college student interested in getting involved in machine learning (ML) but don’t know where to start?  Early in your ML career and want to prepare for mid-level roles? Or aiming at senior/executive-track ML positions? **ML Job Compass** helps you chart the path to your desired ML role. Using **Natural Language Processing (NLP)**, **Data Visualization**, **Large Language Models (LLMs)**, and **Retrieval-Augmented Generation (RAG)**, the app lets you:
-1. Explore required ML skills in current U.S. job postings (2025) by industry domain.  
-2. Choose a target domain, career level, and optional ML specialization to get a tailored *skills checklist* or *phased roadmap*.
+#### 1. Explore required ML skills in current U.S. job postings (2025) by industry domain.  
+#### 2. Choose a target domain, career level, and optional ML specialization to get a tailored *skills checklist* or *phased roadmap*.
 
 ---
 
@@ -87,25 +87,33 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+--- 
+
 ## Navigating the Dashboard 
 <img src="ml_job_compass_main_page.png">
 
 ### **Exploration Tab**:
-<img src=""> 
-Use sliders to view up to the top 10 programming languages, tools & cloud platforms, and ML specializations by domain (or across all domains). Interactive Plotly visuals show counts from current postings.
+#### Use sliders to view up to the top 10 programming languages, tools & cloud platforms, and ML specializations by domain (or across all domains). Interactive Plotly visuals show counts from current postings.
+
+
+<img src="ml_job_compass_exploration.png"> 
+<img src="ml_job_compass_exploration_2.png"> 
+<img src="ml_job_compass_exploration_3.png"> 
+
 
 ### **Personalization Tab**: 
+#### Select:
+#### (1) Industry domain
+#### (2) Target career level (Early Career/Mid-Level/Senior)
+#### (3) Optional ML specialization (e.g., Natural Language Processing (NLP), Machine Learning Operations (MLOps))
+#### (4) Output style (Skills checklist vs. Roadmap with a preparation window (up to 24 months))
+#### After making your desired selections, click **Generate Output**. The app uses the vector store (RAG) & your selections to produce actionable, domain-specific guidance.
+
+> ❓Have any questions while making a selection? Check the **help icon** for additional information. 
+
 <img src="ml_job_compass_personalization.png">
 
-Select: 
-- Industry domain 
-- Target career level (Early Career/Mid-Level/Senior)
-- Optional ML specialization (e.g., Natural Language Processing (NLP), Machine Learning Operations (MLOps))
-- Output style (Skills checklist vs. Roadmap with a preparation window (up to 24 months))
-
-> Have any questions while making a selection? Check the help icon for additional information. 
-
-After making your desired selections, click **Generate Output**. The app uses the vector store (RAG) & your selections to produce actionable, domain-specific guidance.
+--- 
 
 ## Directory 
 ```text
@@ -130,6 +138,8 @@ After making your desired selections, click **Generate Output**. The app uses th
 ├── sample.env                           # Example environment variables 
 └── requirements.txt                     # Python dependencies
 ```
+
+--- 
 
 ## Data Source
 
