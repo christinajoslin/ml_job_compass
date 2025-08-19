@@ -34,7 +34,7 @@ Are you a college student interested in getting involved in machine learning (ML
   MODEL_ID=granite3.3:8b
   OLLAMA_BASE_URL=http://localhost:11434
   ```
-> **Hardware note:** Aim for ~16 GB VRAM and, ideally, a **NVIDIA GeForce RTX GPU** (author tested on RTX 4070).
+> **Hardware note:** Aim for ~16 GB RAM and, ideally, a **NVIDIA GeForce RTX GPU** (author tested on RTX 4070).
 
 > ⚠️**Image size note:** The base CUDA/PyTorch image used for RAG (i.e., top-k similarity search during inference) is large ( $\approx$ **15.35 GB**). Ensure sufficient disk space.
 
