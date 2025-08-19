@@ -40,7 +40,7 @@ Are you a college student interested in getting involved in machine learning (ML
 
 ---
 
-## Container Architecture
+## Deployment Options 
 
 There are two ways to run the app, both relying on **Ollama running locally:**
 
