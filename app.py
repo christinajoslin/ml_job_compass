@@ -116,16 +116,42 @@ for col in list_columns:
     df[col] = df[col].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
 
 # Expand cloud platform acronyms to full names
-mapping = {
+cloud_mapping = {
     "AWS": "Amazon Web Services (AWS)",
     "GCP": "Google Cloud Platform (GCP)",
     "Azure": "Microsoft Azure"
 }
 s = df["cloud_platforms"].explode()  # expand list elements into multiple rows 
 s = s.astype(str).str.strip() # convert to a string
-s = s.replace(mapping, regex=False) # replace acronyms (exact swaps only) 
+s = s.replace(cloud_mapping, regex=False) # replace acronyms (exact swaps only) 
 df["cloud_platforms"] = s.groupby(level=0).agg(list) # group back into a list per original row 
 
+# Expand programming language variants to normalized names
+lang_mapping = {
+    "Node.js": "JavaScript",
+    "Nodejs" : "JavaScript",
+    "Javascript": "JavaScript",  # unify casing
+    "Golang": "Go",
+    "GoLang" : "Go",
+    "GO": "Go",
+    "Presto": "SQL",
+    "Spark": "SQL",
+    "Spark SQL" : "SQL", 
+}
+l = df["programming_languages"].explode()  # expand list elements
+l = l.astype(str).str.strip()  # ensure string format
+l = l.replace(lang_mapping, regex=False)  # apply normalization
+
+# Then expand C/C++ into two items
+l = l.apply(lambda x: ["C", "C++"] if x == "C/C++" else x)
+
+# Explode again in case some entries became lists
+l=l.explode()
+
+# Group back into lists per original row
+df["programming_languages"] = l.groupby(level=0).agg(lambda x: list(dict.fromkeys(x)))
+
+#df["programming_languages"] = l.groupby(level=0).agg(list)  # group back into lists
 
 # Create a new column (frameworks and tools) that merges libraries and tools with cloud platforms 
 # Note: This powers the "Tools & Platforms" chart so cloud providers appear alongside libraries such as PyTorch 
