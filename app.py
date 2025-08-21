@@ -115,6 +115,28 @@ list_columns = ['programming_languages', 'type_of_ml', 'libraries_and_tools', 'c
 for col in list_columns:
     df[col] = df[col].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
 
+t = df["libraries_and_tools"].explode() # expand list elements into multiple rows 
+t = t.astype(str).str.strip() # convert to a string 
+
+# Map tensorflow -> Tensorflow (case-insensitive exact match)
+t = t.replace(to_replace=r'(?i)^tensorflow$', value='Tensorflow', regex=True)
+
+# Map PyTorch (case-insensitive)
+t = t.replace(to_replace=r'(?i)^pytorch$', value='PyTorch', regex=True)
+
+# Map scikit-learn variants (case-insensitive)
+t = t.replace(to_replace=r'(?i)^(scikit[\s-]?learn|sklearn|scikit)$', 
+              value='scikit-learn', regex=True)
+
+# Map Spark variants (case-insensitive)
+t = t.replace(to_replace=r'(?i)^(spark(\s?ml|mllib|sql)?)$', 
+              value='Apache Spark', regex=True)
+
+t = t[~t.str.match(r'(?i)^cuda$')] # Drop CUDA (case-insensitive exact match)
+# Group back; also deduplicate while preserving order
+df["libraries_and_tools"] = t.groupby(level=0).agg(lambda x: list(dict.fromkeys([v for v in x if v])))
+
+
 # Expand cloud platform acronyms to full names
 cloud_mapping = {
     "AWS": "Amazon Web Services (AWS)",
@@ -150,8 +172,6 @@ l=l.explode()
 
 # Group back into lists per original row
 df["programming_languages"] = l.groupby(level=0).agg(lambda x: list(dict.fromkeys(x)))
-
-#df["programming_languages"] = l.groupby(level=0).agg(list)  # group back into lists
 
 # Create a new column (frameworks and tools) that merges libraries and tools with cloud platforms 
 # Note: This powers the "Tools & Platforms" chart so cloud providers appear alongside libraries such as PyTorch 
