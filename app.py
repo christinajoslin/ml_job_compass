@@ -134,6 +134,10 @@ t = t.replace(to_replace=r'(?i)^(spark(\s?ml|mllib|sql)?)$',
 
 t = t[~t.str.match(r'(?i)^cuda$')] # Drop CUDA (case-insensitive exact match)
 # Group back; also deduplicate while preserving order
+
+t = t[t != 'Matlab'] # Drop Matlab 
+t = t[t != 'R'] # Drop R 
+
 df["libraries_and_tools"] = t.groupby(level=0).agg(lambda x: list(dict.fromkeys([v for v in x if v])))
 
 
