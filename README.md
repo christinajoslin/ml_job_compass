@@ -25,7 +25,7 @@ Are you a college student interested in getting involved in machine learning (ML
   - **GPU recommended:** `ollama pull granite3.3:8b` (Granite-3.3-8B-Instruct).  
 > Inference speed and instruction-following quality were evaluated across several models (including the latest GPT OSS 20B model). Empirically, **Granite-3.3-8B-Instruct** was a solid default for this application.
 
-  - **CPU-only option:** `ollama pull granite3.1:2b` (smaller model, slower but workable).
+  - **CPU-only option:** `ollama pull granite3.3:2b` (smaller model, slower but workable).
 #### **Step 3 (if using containers):** Install **[Docker Desktop](https://www.docker.com/products/docker-desktop)**
 
 #### **Step 4:** Create a `.env` file  
