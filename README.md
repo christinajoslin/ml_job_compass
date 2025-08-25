@@ -1,6 +1,9 @@
-# 🧭 ML Job Compass 
-## *Get the machine learning job you want by learning the skills to get there.*
+
+# 🧭 ML Job Compass
+## *Get the machine learning job you want by learning the skills to get there.* 
 **Author:** Christina Joslin
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16938493.svg)](https://doi.org/10.5281/zenodo.16938493) 
 
 Are you a college student interested in getting involved in machine learning (ML) but don’t know where to start?  Early in your ML career and want to prepare for mid-level roles? Or aiming at senior/executive-track ML positions? **ML Job Compass** helps you chart the path to your desired ML role. Using **Natural Language Processing (NLP)**, **Data Visualization**, **Large Language Models (LLMs)**, and **Retrieval-Augmented Generation (RAG)**, the app lets you:
 #### 1. Explore required ML skills in current U.S. job postings (2025) by industry domain.  
